@@ -5,6 +5,7 @@ what's currently there, and (re)building the vector store + profile from
 whatever files are on disk. Supports PDF, Markdown, and JSON.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -77,6 +78,10 @@ def parse_profile_json(raw_bytes: bytes) -> dict:
     return profile
 
 
+def content_hash(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
 def chunk_text(text: str) -> list[str]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.CHUNK_SIZE,
@@ -125,7 +130,10 @@ def save_uploaded_file(filename: str, raw_bytes: bytes) -> str:
 
 
 def rebuild_knowledge_base() -> dict:
-    """Reprocess every file in data/knowledge/ into the vector store.
+    """Force-reprocess every file in data/knowledge/ into the vector store,
+    even ones that haven't changed. The explicit "rebuild everything" escape
+    hatch (admin-triggered); sync_knowledge_base() is the cheap incremental
+    path used on every app boot.
 
     JSON files are the structured profile (validated, left on disk as-is).
     PDF/Markdown files are extracted, normalized, chunked, and embedded.
@@ -146,22 +154,67 @@ def rebuild_knowledge_base() -> dict:
         if suffix not in {".pdf", ".md"}:
             continue
 
+        raw = path.read_bytes()
         text = extract_text(path)
         normalized = normalize_text(text)
         chunks = chunk_text(normalized)
         if not chunks:
             logger.warning("%s produced no usable content after processing", path.name)
             continue
-        chunks_indexed += vectorstore.add_documents(chunks, source=path.name)
+        chunks_indexed += vectorstore.add_documents(chunks, source=path.name, doc_hash=content_hash(raw))
         documents_indexed += 1
 
     return {"documents_indexed": documents_indexed, "chunks_indexed": chunks_indexed}
 
 
-def ensure_knowledge_base() -> None:
-    """Build the vector store from disk on startup if it's empty but files exist."""
-    if get_vectorstore().count() > 0:
-        return
-    if not list_knowledge_files():
-        return
-    rebuild_knowledge_base()
+def sync_knowledge_base() -> dict:
+    """Bring the vector store in line with data/knowledge/ on disk, without
+    re-embedding anything that hasn't changed.
+
+    A file is (re)embedded only if it's new or its content hash differs from
+    what's currently indexed; vectors for files no longer on disk are purged.
+    Safe (and cheap) to call on every app start.
+    """
+    settings.KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+    files = {p.name: p for p in settings.KNOWLEDGE_DIR.iterdir() if _is_knowledge_candidate(p)}
+    chunkable = {name: path for name, path in files.items() if path.suffix.lower() in {".pdf", ".md"}}
+
+    vectorstore = get_vectorstore()
+    indexed = vectorstore.indexed_documents()
+
+    for source in indexed:
+        if source not in chunkable:
+            vectorstore.delete_by_source(source)
+
+    chunks_indexed = 0
+    documents_indexed = 0
+    documents_skipped = 0
+    for name, path in sorted(chunkable.items()):
+        raw = path.read_bytes()
+        doc_hash = content_hash(raw)
+        existing = indexed.get(name)
+        if existing and existing["doc_hash"] == doc_hash:
+            documents_skipped += 1
+            continue
+
+        if existing:
+            vectorstore.delete_by_source(name)
+
+        text = extract_text(path)
+        normalized = normalize_text(text)
+        chunks = chunk_text(normalized)
+        if not chunks:
+            logger.warning("%s produced no usable content after processing", path.name)
+            continue
+        chunks_indexed += vectorstore.add_documents(chunks, source=name, doc_hash=doc_hash)
+        documents_indexed += 1
+
+    for name, path in files.items():
+        if path.suffix.lower() == ".json":
+            parse_profile_json(path.read_bytes())  # surfaces validation errors
+
+    return {
+        "documents_indexed": documents_indexed,
+        "documents_skipped": documents_skipped,
+        "chunks_indexed": chunks_indexed,
+    }

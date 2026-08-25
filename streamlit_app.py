@@ -2,12 +2,12 @@
 
 import streamlit as st
 
-from app.rag.ingestion import ensure_knowledge_base
+from app.rag.ingestion import sync_knowledge_base
 from app.ui.theme import configure_page
 
 configure_page("Varun Teja Jaladhula — AI Assistant")
 
-ensure_knowledge_base()
+sync_knowledge_base()
 
 pages = [
     st.Page("pages/chat.py", title="AI Assistant", url_path="chat", default=True),

@@ -83,4 +83,4 @@ if st.button("Rebuild Knowledge Base", type="primary"):
             _status("Failed to process document.", ok=False)
 
 st.html('<hr style="margin: 1.5rem 0 0.75rem; opacity: 0.4;" />')
-st.page_link("pages/home.py", label="← Back to site")
+st.page_link("pages/chat.py", label="← Back to site")

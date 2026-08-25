@@ -39,7 +39,7 @@ LANGCHAIN_PROJECT = _get("LANGCHAIN_PROJECT", "personal-recruiter-chatbot")
 ADMIN_PASSWORD = _get("ADMIN_PASSWORD", "")
 
 # RAG / vector store
-CHROMA_PATH = _get("CHROMA_PATH", str(BASE_DIR / "data" / "vectorstore"))
+CHROMA_PATH = _get("CHROMA_PATH", str(BASE_DIR / "db" / "chroma"))
 CHROMA_COLLECTION = _get("CHROMA_COLLECTION", "resume")
 EMBEDDING_MODEL = _get("EMBEDDING_MODEL", "gemini-embedding-001")
 TOP_K = int(_get("TOP_K", "5"))

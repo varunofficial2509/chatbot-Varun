@@ -6,6 +6,7 @@ backend can be swapped later without touching the rest of the app.
 """
 
 import hashlib
+from datetime import datetime, timezone
 
 import chromadb
 import streamlit as st
@@ -39,18 +40,53 @@ class VectorStore:
         except ValueError:
             pass  # collection doesn't exist yet
 
-    def add_documents(self, documents: list[str], source: str) -> int:
-        """Embed and store chunks, tagging each with its source filename."""
+    def add_documents(self, documents: list[str], source: str, doc_hash: str) -> int:
+        """Embed and store chunks, tagging each with its source filename, position,
+        the source document's content hash, and when it was indexed."""
         if not documents:
             return 0
         collection = _get_collection()
+        ingested_at = datetime.now(timezone.utc).isoformat()
         ids = [
             f"{source}-{i}-{hashlib.sha256(c.encode('utf-8')).hexdigest()[:16]}"
             for i, c in enumerate(documents)
         ]
-        metadatas = [{"source": source, "chunk_index": i} for i in range(len(documents))]
+        metadatas = [
+            {
+                "source": source,
+                "chunk_index": i,
+                "doc_hash": doc_hash,
+                "ingested_at": ingested_at,
+            }
+            for i in range(len(documents))
+        ]
         collection.add(documents=documents, ids=ids, metadatas=metadatas)
         return len(documents)
+
+    def delete_by_source(self, source: str) -> None:
+        """Purge every chunk belonging to one source document."""
+        collection = _get_collection()
+        if collection.count() == 0:
+            return
+        collection.delete(where={"source": source})
+
+    def indexed_documents(self) -> dict[str, dict]:
+        """Per-source summary of what's currently indexed: {source: {doc_hash, chunk_count}}.
+
+        Used to skip re-embedding unchanged files and to drive the admin UI's
+        document listing.
+        """
+        collection = _get_collection()
+        if collection.count() == 0:
+            return {}
+        result = collection.get(include=["metadatas"])
+        summary: dict[str, dict] = {}
+        for meta in result.get("metadatas") or []:
+            if not meta or "source" not in meta:
+                continue
+            entry = summary.setdefault(meta["source"], {"doc_hash": meta.get("doc_hash", ""), "chunk_count": 0})
+            entry["chunk_count"] += 1
+        return summary
 
     def search(self, query: str, top_k: int | None = None) -> list[str]:
         collection = _get_collection()

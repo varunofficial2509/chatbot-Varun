@@ -40,3 +40,29 @@ def run_graph(question: str, chat_history: list[dict], profile: dict) -> Recruit
             "metadata": {"project": settings.LANGCHAIN_PROJECT},
         },
     )
+
+
+def stream_graph(question: str, chat_history: list[dict], profile: dict):
+    """Yield the answer as it's generated, token by token.
+
+    Uses stream_mode="messages" so the underlying chat model's tokens are
+    surfaced as they're produced, without changing how generate_answer
+    calls the LLM (LangGraph streams any chat model invoked inside a node
+    automatically). Filtered to the generate_answer node so retrieval
+    doesn't emit anything here.
+    """
+    compiled = build_graph()
+    inputs = {
+        "question": question,
+        "chat_history": chat_history,
+        "profile": profile,
+        "retrieved_context": [],
+        "answer": "",
+    }
+    config = {
+        "tags": ["recruiter-chat"],
+        "metadata": {"project": settings.LANGCHAIN_PROJECT},
+    }
+    for message_chunk, metadata in compiled.stream(inputs, stream_mode="messages", config=config):
+        if metadata.get("langgraph_node") == "generate_answer" and message_chunk.text:
+            yield message_chunk.text

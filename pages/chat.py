@@ -12,11 +12,9 @@ import logging
 
 import streamlit as st
 
-from app.graph.graph import run_graph
+from app.graph.graph import stream_graph
 from app.graph.prompts import NO_KNOWLEDGE_BASE_MESSAGE
 from app.rag.profile_store import has_profile, load_profile
-from app.services import content
-from app.ui import components
 from app.ui.theme import inject_css
 
 logger = logging.getLogger("recruiter_bot.chat_page")
@@ -31,9 +29,6 @@ SUGGESTIONS = [
 ]
 
 inject_css()
-
-profile_meta = content.load_profile()
-components.render_nav_header(name=profile_meta.get("name", ""))
 
 st.html(
     """
@@ -69,22 +64,23 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
     with st.chat_message("assistant"):
         if not has_profile():
             answer = NO_KNOWLEDGE_BASE_MESSAGE
+            st.markdown(answer)
         else:
-            with st.spinner("Thinking..."):
-                try:
-                    result = run_graph(
+            try:
+                answer = st.write_stream(
+                    stream_graph(
                         question=st.session_state.messages[-1]["content"],
                         chat_history=st.session_state.messages[:-1],
                         profile=rag_profile,
                     )
-                    answer = result["answer"]
-                except Exception:
-                    logger.exception("Chat request failed")
-                    answer = (
-                        "Sorry, I ran into a problem answering that just now. "
-                        "Please try again in a moment."
-                    )
-        st.markdown(answer)
+                )
+            except Exception:
+                logger.exception("Chat request failed")
+                answer = (
+                    "Sorry, I ran into a problem answering that just now. "
+                    "Please try again in a moment."
+                )
+                st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
     del st.session_state.messages[: max(0, len(st.session_state.messages) - MAX_HISTORY_TURNS)]
