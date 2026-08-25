@@ -1,0 +1,19 @@
+{
+  "name": "Varun Teja Jaladhula",
+  "title": "Software Engineer",
+  "tagline": "Java • Spring Boot • Microservices • GenAI",
+  "summary": "Building scalable backend systems and AI-powered applications.",
+  "about": "Software engineer with ~4 years of experience specializing in Java, Spring Boot, microservices, and Angular, with hands-on experience building RAG and LLM applications. I focus on distributed systems and event-driven architecture, and more recently on applying that backend depth to Generative AI — retrieval-augmented generation, LangChain, and LangGraph.",
+  "current_focus": [
+    "GenAI",
+    "RAG",
+    "LLM Applications",
+    "Distributed Systems",
+    "Backend Engineering"
+  ],
+  "contact": {
+    "github": "https://github.com/varunofficial2509",
+    "linkedin": "",
+    "email": ""
+  }
+}

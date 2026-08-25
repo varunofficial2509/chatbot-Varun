@@ -1,0 +1,51 @@
+{
+  "name": "Your Name",
+  "headline": "Java Full Stack Engineer",
+  "years_of_experience": 4,
+  "current_role": "Software Engineer at Example Corp",
+  "skills": [
+    "Java",
+    "Spring Boot",
+    "Microservices",
+    "REST APIs",
+    "PostgreSQL",
+    "Angular",
+    "Docker"
+  ],
+  "experience": [
+    {
+      "company": "Example Corp",
+      "title": "Software Engineer",
+      "start_date": "2022-01",
+      "end_date": "Present",
+      "responsibilities": [
+        "Built and maintained REST APIs using Spring Boot",
+        "Migrated a monolith to microservices architecture"
+      ],
+      "technologies": ["Java", "Spring Boot", "PostgreSQL", "Docker"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Example Project",
+      "description": "Short description of what the project does and your role in it.",
+      "technologies": ["Java", "React"],
+      "url": ""
+    }
+  ],
+  "education": [
+    {
+      "institution": "Example University",
+      "degree": "B.Tech in Computer Science",
+      "graduation_year": 2021
+    }
+  ],
+  "achievements": [
+    "Example achievement or certification"
+  ],
+  "interview_topics": [
+    "Microservices design tradeoffs",
+    "REST API versioning strategies"
+  ],
+  "career_summary": "A short first-person summary of your background, focus areas, and what you're looking for next."
+}
