@@ -8,9 +8,15 @@ class ChatTurn(TypedDict):
     content: str
 
 
+class RetrievedChunk(TypedDict):
+    content: str
+    source: str
+    score: float
+
+
 class RecruiterState(TypedDict):
     question: str
     chat_history: list[ChatTurn]
     profile: dict
-    retrieved_context: list[str]
+    retrieved_context: list[RetrievedChunk]
     answer: str

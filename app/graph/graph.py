@@ -42,14 +42,19 @@ def run_graph(question: str, chat_history: list[dict], profile: dict) -> Recruit
     )
 
 
-def stream_graph(question: str, chat_history: list[dict], profile: dict):
+def stream_graph(question: str, chat_history: list[dict], profile: dict, sources_out: list | None = None):
     """Yield the answer as it's generated, token by token.
 
-    Uses stream_mode="messages" so the underlying chat model's tokens are
-    surfaced as they're produced, without changing how generate_answer
-    calls the LLM (LangGraph streams any chat model invoked inside a node
-    automatically). Filtered to the generate_answer node so retrieval
-    doesn't emit anything here.
+    Uses stream_mode=["updates", "messages"] so the underlying chat model's
+    tokens are surfaced as they're produced (without changing how
+    generate_answer calls the LLM -- LangGraph streams any chat model
+    invoked inside a node automatically), while "updates" lets us also
+    catch retrieve_context's output as soon as that node finishes -- always
+    before generate_answer starts streaming, since the graph runs them in
+    that order. If sources_out is given, it's extended in place with the
+    retrieved chunks so the caller can read it once the generator (a plain
+    list, not a return value, since this is a generator function) has been
+    fully consumed, e.g. by st.write_stream.
     """
     compiled = build_graph()
     inputs = {
@@ -63,6 +68,12 @@ def stream_graph(question: str, chat_history: list[dict], profile: dict):
         "tags": ["recruiter-chat"],
         "metadata": {"project": settings.LANGCHAIN_PROJECT},
     }
-    for message_chunk, metadata in compiled.stream(inputs, stream_mode="messages", config=config):
-        if metadata.get("langgraph_node") == "generate_answer" and message_chunk.text:
-            yield message_chunk.text
+    for mode, chunk in compiled.stream(inputs, stream_mode=["updates", "messages"], config=config):
+        if mode == "updates":
+            update = chunk.get("retrieve_context")
+            if update and sources_out is not None:
+                sources_out.extend(update.get("retrieved_context", []))
+        elif mode == "messages":
+            message_chunk, metadata = chunk
+            if metadata.get("langgraph_node") == "generate_answer" and message_chunk.text:
+                yield message_chunk.text

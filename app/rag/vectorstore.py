@@ -88,15 +88,34 @@ class VectorStore:
             entry["chunk_count"] += 1
         return summary
 
-    def search(self, query: str, top_k: int | None = None) -> list[str]:
+    def search(self, query: str, top_k: int | None = None) -> list[dict]:
+        """Return up to top_k chunks, each with its source document and a
+        0-1 relevance score (higher is more relevant), for both grounding
+        the answer and showing retrieval transparency in the UI."""
         collection = _get_collection()
         count = collection.count()
         if count == 0:
             return []
         k = min(top_k or settings.TOP_K, count)
-        results = collection.query(query_texts=[query], n_results=k)
-        documents = results.get("documents") or [[]]
-        return documents[0]
+        results = collection.query(
+            query_texts=[query],
+            n_results=k,
+            include=["documents", "metadatas", "distances"],
+        )
+        documents = (results.get("documents") or [[]])[0]
+        metadatas = (results.get("metadatas") or [[]])[0]
+        distances = (results.get("distances") or [[]])[0]
+        return [
+            {
+                "content": document,
+                "source": (metadata or {}).get("source", "unknown"),
+                # Chroma returns a distance, not a similarity; this maps it
+                # onto a 0-1 scale (1 = identical) regardless of the
+                # underlying distance metric, for a consistent UI score.
+                "score": round(1 / (1 + distance), 3),
+            }
+            for document, metadata, distance in zip(documents, metadatas, distances)
+        ]
 
 
 @st.cache_resource(show_spinner=False)

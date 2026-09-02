@@ -9,6 +9,7 @@ either of those side effects).
 
 import base64
 import mimetypes
+import re
 
 import streamlit as st
 
@@ -494,6 +495,93 @@ def _project_card_html(index: int, project: dict) -> str:
 def render_projects_grid(projects: list[dict]) -> None:
     cards = "".join(_project_card_html(i, project) for i, project in enumerate(projects, start=1))
     st.html(f'<div class="vt-projects-grid">{cards}</div>')
+
+
+_MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}[ \t]+.*$\n?", re.MULTILINE)
+
+
+def _strip_markdown_headings(text: str) -> str:
+    """Drops ATX headings (# through ######) from a knowledge chunk before
+    display. The expander's own label (source + score) already gives
+    context, so a section heading repeated inside the body is just noise —
+    chunk overlap often carries one into several consecutive chunks.
+    """
+    return _MARKDOWN_HEADING_RE.sub("", text).strip()
+
+
+def render_retrieved_sources(chunks: list[dict], key_prefix: str) -> None:
+    """Transparency panel under an assistant answer: which knowledge-base
+    documents and chunks grounded it, and how each chunk scored against the
+    question (0-1, higher = more relevant). ``key_prefix`` must be unique
+    per rendered answer (e.g. the message index) so repeated calls across
+    the chat history don't collide on widget identity.
+    """
+    if not chunks:
+        return
+
+    unique_sources = sorted({chunk.get("source", "unknown") for chunk in chunks})
+    with st.expander(f"📄 Sources ({len(unique_sources)})", key=f"{key_prefix}_sources"):
+        for name in unique_sources:
+            st.markdown(f"- `{name}`")
+        st.markdown("**Retrieved chunks:**")
+
+        # st.popover, not st.expander -- Streamlit doesn't allow nesting one
+        # expander inside another, but a popover nests fine and gives the
+        # same "click to see details" interaction, all kept under the one
+        # Sources dropdown instead of spilling out as top-level rows.
+        for i, chunk in enumerate(chunks):
+            score = chunk.get("score")
+            score_label = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+            source = chunk.get("source", "unknown")
+            with st.popover(
+                f"{source}  (score: {score_label})",
+                use_container_width=True,
+                key=f"{key_prefix}_chunk_{i}",
+            ):
+                st.markdown(_strip_markdown_headings(chunk.get("content", "")))
+
+
+@st.dialog("Contact")
+def _render_contact_dialog(contact: dict) -> None:
+    has_any = False
+    if contact.get("email"):
+        has_any = True
+        st.markdown(f"**Email** — [{contact['email']}](mailto:{contact['email']})")
+    if contact.get("linkedin"):
+        has_any = True
+        st.markdown(f"**LinkedIn** — [{contact['linkedin']}]({contact['linkedin']})")
+    if contact.get("github"):
+        has_any = True
+        st.markdown(f"**GitHub** — [{contact['github']}]({contact['github']})")
+    if not has_any:
+        st.caption("No contact details configured yet.")
+
+
+def render_chat_sidebar(profile: dict) -> None:
+    """Sidebar for the standalone AI assistant page: conversation controls
+    plus a way to reach the owner. Pinned permanently open -- its own
+    collapse button is hidden (see .st-key-vt_side_panel's sibling rule,
+    [data-testid="stSidebarCollapseButton"], in theme.py) so there's no
+    open/close state to get stuck in.
+    """
+    name = profile.get("name", "AI Assistant")
+    contact = profile.get("contact", {})
+
+    with st.sidebar:
+        st.html(f'<div class="vt-side-panel-title mono"><span class="accent">$</span> {name}</div>')
+        st.caption("Personal AI Assistant")
+        st.divider()
+
+        if st.button("Clear current conversation", use_container_width=True, key="vt_side_clear_chat"):
+            st.session_state.messages = []
+            st.rerun()
+
+        if st.button("✉️ Contact", use_container_width=True, key="vt_side_contact"):
+            _render_contact_dialog(contact)
+
+        portfolio_url = contact.get("portfolio")
+        if portfolio_url:
+            st.link_button("🔗 Portfolio", portfolio_url, use_container_width=True, key="vt_side_portfolio")
 
 
 def render_footer() -> None:

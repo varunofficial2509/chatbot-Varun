@@ -34,14 +34,28 @@ _CSS = f"""
 /* Streamlit chrome removal                                               */
 /* ---------------------------------------------------------------------- */
 
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
-[data-testid="stStatusWidget"] {{
+footer, [data-testid="stMainMenu"], [data-testid="stAppDeployButton"],
+[data-testid="stToolbarActions"], [data-testid="stStatusWidget"] {{
     visibility: hidden;
     height: 0;
 }}
 
+/* Not [data-testid="stToolbar"] itself, and not display:none on the header
+   -- stExpandSidebarButton (reopens a collapsed sidebar) is also rendered
+   inside stToolbar/stHeader, with no test-id of its own to target
+   separately. Hiding either ancestor hid that button along with the chrome
+   we actually don't want, leaving no way back in once the sidebar was
+   closed. The header is zero-height and click-through instead, so it
+   takes up no visual space but doesn't block the button it contains. */
 [data-testid="stHeader"] {{
-    display: none;
+    background: transparent;
+    height: 0;
+    min-height: 0;
+    overflow: visible;
+    pointer-events: none;
+}}
+[data-testid="stHeader"] > * {{
+    pointer-events: auto;
 }}
 
 [data-testid="stSidebar"] {{
@@ -50,6 +64,10 @@ _CSS = f"""
 }}
 
 [data-testid="stSidebarNav"] {{ display: none; }}
+
+/* Pinned open permanently: no collapse control inside the sidebar, so
+   there's no open/close state for it to get stuck in. */
+[data-testid="stSidebarCollapseButton"] {{ display: none !important; }}
 
 html, body, .stApp {{
     background: var(--bg);
@@ -670,6 +688,20 @@ input, textarea {{
 [data-testid="stChatInputSubmitButton"]:hover {{ opacity: 0.85; }}
 
 /* ---------------------------------------------------------------------- */
+/* Sidebar (chat page: conversation controls, contact, portfolio link)    */
+/* ---------------------------------------------------------------------- */
+
+.vt-side-panel-title {{
+    font-size: 1.05rem;
+    padding: 0.4rem 0 0.15rem;
+}}
+
+[data-testid="stSidebar"] .stButton > button,
+[data-testid="stSidebar"] .stLinkButton > a {{
+    font-size: 0.85rem;
+}}
+
+/* ---------------------------------------------------------------------- */
 /* Misc widgets                                                           */
 /* ---------------------------------------------------------------------- */
 
@@ -682,6 +714,19 @@ input, textarea {{
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
+}}
+
+/* Retrieved-chunk excerpts (see components.render_retrieved_sources, which
+   renders each one in a popover nested inside the outer Sources expander):
+   small, italic, muted -- they're supporting evidence for an answer, not
+   the answer itself, so they shouldn't compete visually with it. Popovers
+   are the only ones in this app, so this targets every popover body. */
+[data-testid="stPopoverBody"] p,
+[data-testid="stPopoverBody"] li {{
+    font-size: 0.8rem;
+    font-style: italic;
+    color: var(--text-muted);
+    line-height: 1.55;
 }}
 
 .vt-footer {{
@@ -706,7 +751,7 @@ def configure_page(title: str) -> None:
         page_title=title,
         page_icon="◆",
         layout="centered",
-        initial_sidebar_state="collapsed",
+        initial_sidebar_state="expanded",
     )
 
 

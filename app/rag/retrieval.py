@@ -3,6 +3,7 @@
 from app.rag.vectorstore import get_vectorstore
 
 
-def retrieve_relevant_chunks(question: str, top_k: int | None = None) -> list[str]:
-    """Return up to top_k knowledge chunks most relevant to the question."""
+def retrieve_relevant_chunks(question: str, top_k: int | None = None) -> list[dict]:
+    """Return up to top_k knowledge chunks most relevant to the question,
+    each as {"content", "source", "score"}."""
     return get_vectorstore().search(question, top_k=top_k)

@@ -15,6 +15,8 @@ import streamlit as st
 from app.graph.graph import stream_graph
 from app.graph.prompts import NO_KNOWLEDGE_BASE_MESSAGE
 from app.rag.profile_store import has_profile, load_profile
+from app.services import content
+from app.ui import components
 from app.ui.theme import inject_css
 
 logger = logging.getLogger("recruiter_bot.chat_page")
@@ -29,6 +31,7 @@ SUGGESTIONS = [
 ]
 
 inject_css()
+components.render_chat_sidebar(content.load_profile())
 
 st.html(
     """
@@ -56,11 +59,16 @@ if not st.session_state.messages:
         st.session_state.messages.append({"role": "user", "content": clicked})
         st.rerun()
 else:
-    for turn in st.session_state.messages:
+    for i, turn in enumerate(st.session_state.messages):
         with st.chat_message(turn["role"]):
             st.markdown(turn["content"])
+        components.render_retrieved_sources(turn.get("sources", []), key_prefix=f"hist_{i}")
 
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    # The index this turn's answer will occupy once appended below -- used
+    # to key its sources panel consistently with the history loop above.
+    next_key_prefix = f"hist_{len(st.session_state.messages)}"
+    sources: list[dict] = []
     with st.chat_message("assistant"):
         if not has_profile():
             answer = NO_KNOWLEDGE_BASE_MESSAGE
@@ -72,6 +80,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                         question=st.session_state.messages[-1]["content"],
                         chat_history=st.session_state.messages[:-1],
                         profile=rag_profile,
+                        sources_out=sources,
                     )
                 )
             except Exception:
@@ -80,9 +89,12 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
                     "Sorry, I ran into a problem answering that just now. "
                     "Please try again in a moment."
                 )
+                sources = []
                 st.markdown(answer)
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    components.render_retrieved_sources(sources, key_prefix=next_key_prefix)
+
+    st.session_state.messages.append({"role": "assistant", "content": answer, "sources": sources})
     del st.session_state.messages[: max(0, len(st.session_state.messages) - MAX_HISTORY_TURNS)]
 
 question = st.chat_input("Ask anything about my experience...")
