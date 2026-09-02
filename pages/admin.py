@@ -5,12 +5,8 @@ import logging
 import streamlit as st
 
 from app import config as settings
-from app.rag.ingestion import (
-    IngestionError,
-    list_knowledge_files,
-    rebuild_knowledge_base,
-    save_uploaded_file,
-)
+from app.rag.ingestion import IngestionError, ingest_file, save_uploaded_file, sync_knowledge_base
+from app.rag.vectorstore import get_vectorstore
 from app.services import content
 from app.ui import components
 from app.ui.theme import inject_css
@@ -52,34 +48,44 @@ uploaded = st.file_uploader("Upload document", type=["pdf", "md", "json"], key="
 if uploaded is not None and st.button("Upload"):
     try:
         saved_name = save_uploaded_file(uploaded.name, uploaded.getvalue())
-        _status(f"Saved {saved_name}. Rebuild the knowledge base to apply it.", ok=True)
+        if settings.KNOWLEDGE_DIR.joinpath(saved_name).suffix.lower() in {".pdf", ".md"}:
+            result = ingest_file(settings.KNOWLEDGE_DIR / saved_name)
+            _status(f"Indexed {saved_name} ({result['chunks_indexed']} chunks).", ok=True)
+        else:
+            _status(f"Saved {saved_name}.", ok=True)
     except IngestionError as exc:
         _status(str(exc), ok=False)
     except Exception:
-        logger.exception("Failed to save uploaded knowledge file")
+        logger.exception("Failed to save/ingest uploaded knowledge file")
         _status("Failed to process document.", ok=False)
 
 st.markdown("**Current knowledge**")
-files = list_knowledge_files()
-if files:
-    items = "".join(f"<li>{name}</li>" for name in files)
+indexed = get_vectorstore().indexed_documents()
+if indexed:
+    items = "".join(
+        f"<li>{name} <span class='text-faint'>({info['chunk_count']} chunks)</span></li>"
+        for name, info in sorted(indexed.items())
+    )
     st.html(f'<ul class="text-muted" style="font-size: 0.9rem;">{items}</ul>')
 else:
-    st.html('<span class="text-muted">No knowledge files yet.</span>')
+    st.html('<span class="text-muted">No documents indexed yet.</span>')
 
-if st.button("Rebuild Knowledge Base", type="primary"):
-    with st.spinner("Rebuilding..."):
+if st.button("Sync Knowledge Base"):
+    with st.spinner("Syncing..."):
         try:
-            result = rebuild_knowledge_base()
-            _status(
-                f"Knowledge added successfully "
-                f"({result['chunks_indexed']} chunks from {result['documents_indexed']} documents).",
-                ok=True,
-            )
+            result = sync_knowledge_base()
+            if result["documents_indexed"]:
+                _status(
+                    f"Indexed {result['documents_indexed']} new document(s) found in data/knowledge/ "
+                    f"({result['chunks_indexed']} chunks).",
+                    ok=True,
+                )
+            else:
+                _status("Nothing new to index.", ok=True)
         except IngestionError as exc:
             _status(str(exc), ok=False)
         except Exception:
-            logger.exception("Failed to rebuild knowledge base")
+            logger.exception("Failed to sync knowledge base")
             _status("Failed to process document.", ok=False)
 
 st.html('<hr style="margin: 1.5rem 0 0.75rem; opacity: 0.4;" />')

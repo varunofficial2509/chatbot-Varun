@@ -1,8 +1,11 @@
-"""Document ingestion: extract -> normalize -> chunk -> embed -> store.
+"""Document ingestion: extract -> normalize -> chunk -> embed -> store -> delete.
 
-Owns everything under data/knowledge/: saving newly uploaded files, listing
-what's currently there, and (re)building the vector store + profile from
-whatever files are on disk. Supports PDF, Markdown, and JSON.
+Owns everything under data/knowledge/: saving newly uploaded files and
+turning PDF/Markdown files into vectors. Once a file is embedded it's
+deleted from disk — the Chroma index is the durable copy, so nothing here
+accumulates raw uploads over time. JSON is the one exception: it's the
+structured profile, kept on disk as-is rather than chunked. Supports PDF,
+Markdown, and JSON.
 """
 
 import hashlib
@@ -99,12 +102,6 @@ def _is_knowledge_candidate(path: Path) -> bool:
     return path.is_file() and ".example." not in path.name
 
 
-def list_knowledge_files() -> list[str]:
-    if not settings.KNOWLEDGE_DIR.exists():
-        return []
-    return sorted(p.name for p in settings.KNOWLEDGE_DIR.iterdir() if _is_knowledge_candidate(p))
-
-
 def save_uploaded_file(filename: str, raw_bytes: bytes) -> str:
     """Validate and persist an uploaded knowledge file. Returns the saved filename."""
     suffix = Path(filename).suffix.lower()
@@ -129,20 +126,49 @@ def save_uploaded_file(filename: str, raw_bytes: bytes) -> str:
     return target.name
 
 
-def rebuild_knowledge_base() -> dict:
-    """Force-reprocess every file in data/knowledge/ into the vector store,
-    even ones that haven't changed. The explicit "rebuild everything" escape
-    hatch (admin-triggered); sync_knowledge_base() is the cheap incremental
-    path used on every app boot.
+def ingest_file(path: Path) -> dict:
+    """Chunk, embed, and index one PDF/Markdown file — then delete it from disk.
 
-    JSON files are the structured profile (validated, left on disk as-is).
-    PDF/Markdown files are extracted, normalized, chunked, and embedded.
+    The vector store is the durable copy once a document is embedded; keeping
+    the raw upload around afterward would only double storage for no benefit.
+    The file is removed only after a successful embed, so a failed ingest
+    (bad extraction, embedding API error, ...) leaves it in place rather than
+    silently losing it. Re-ingesting a name that's already indexed replaces
+    its old chunks (this is how "update a document" works: upload the same
+    filename again).
+    """
+    raw = path.read_bytes()
+    doc_hash = content_hash(raw)
+    text = extract_text(path)
+    normalized = normalize_text(text)
+    chunks = chunk_text(normalized)
+    if not chunks:
+        raise IngestionError(f"{path.name} produced no usable content after processing.")
+
+    vectorstore = get_vectorstore()
+    if path.name in vectorstore.indexed_documents():
+        vectorstore.delete_by_source(path.name)  # replacing a prior version of this document
+
+    chunks_indexed = vectorstore.add_documents(chunks, source=path.name, doc_hash=doc_hash)
+    path.unlink()
+    return {"source": path.name, "chunks_indexed": chunks_indexed}
+
+
+def delete_document(source: str) -> None:
+    """Remove one document's vectors from the index by its source filename."""
+    get_vectorstore().delete_by_source(source)
+
+
+def sync_knowledge_base() -> dict:
+    """Ingest any PDF/Markdown files sitting in data/knowledge/ that haven't
+    been embedded yet — e.g. dropped in directly rather than through the admin
+    upload flow, which already embeds-and-deletes in one step. Each file is
+    deleted from disk once indexed, so a normal run finds nothing to do here;
+    the vector store itself is the source of truth, not this directory. Safe
+    to call on every app start.
     """
     settings.KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     files = [p for p in settings.KNOWLEDGE_DIR.iterdir() if _is_knowledge_candidate(p)]
-
-    vectorstore = get_vectorstore()
-    vectorstore.clear()
 
     chunks_indexed = 0
     documents_indexed = 0
@@ -154,67 +180,8 @@ def rebuild_knowledge_base() -> dict:
         if suffix not in {".pdf", ".md"}:
             continue
 
-        raw = path.read_bytes()
-        text = extract_text(path)
-        normalized = normalize_text(text)
-        chunks = chunk_text(normalized)
-        if not chunks:
-            logger.warning("%s produced no usable content after processing", path.name)
-            continue
-        chunks_indexed += vectorstore.add_documents(chunks, source=path.name, doc_hash=content_hash(raw))
+        result = ingest_file(path)
+        chunks_indexed += result["chunks_indexed"]
         documents_indexed += 1
 
     return {"documents_indexed": documents_indexed, "chunks_indexed": chunks_indexed}
-
-
-def sync_knowledge_base() -> dict:
-    """Bring the vector store in line with data/knowledge/ on disk, without
-    re-embedding anything that hasn't changed.
-
-    A file is (re)embedded only if it's new or its content hash differs from
-    what's currently indexed; vectors for files no longer on disk are purged.
-    Safe (and cheap) to call on every app start.
-    """
-    settings.KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
-    files = {p.name: p for p in settings.KNOWLEDGE_DIR.iterdir() if _is_knowledge_candidate(p)}
-    chunkable = {name: path for name, path in files.items() if path.suffix.lower() in {".pdf", ".md"}}
-
-    vectorstore = get_vectorstore()
-    indexed = vectorstore.indexed_documents()
-
-    for source in indexed:
-        if source not in chunkable:
-            vectorstore.delete_by_source(source)
-
-    chunks_indexed = 0
-    documents_indexed = 0
-    documents_skipped = 0
-    for name, path in sorted(chunkable.items()):
-        raw = path.read_bytes()
-        doc_hash = content_hash(raw)
-        existing = indexed.get(name)
-        if existing and existing["doc_hash"] == doc_hash:
-            documents_skipped += 1
-            continue
-
-        if existing:
-            vectorstore.delete_by_source(name)
-
-        text = extract_text(path)
-        normalized = normalize_text(text)
-        chunks = chunk_text(normalized)
-        if not chunks:
-            logger.warning("%s produced no usable content after processing", path.name)
-            continue
-        chunks_indexed += vectorstore.add_documents(chunks, source=name, doc_hash=doc_hash)
-        documents_indexed += 1
-
-    for name, path in files.items():
-        if path.suffix.lower() == ".json":
-            parse_profile_json(path.read_bytes())  # surfaces validation errors
-
-    return {
-        "documents_indexed": documents_indexed,
-        "documents_skipped": documents_skipped,
-        "chunks_indexed": chunks_indexed,
-    }
