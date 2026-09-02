@@ -9,3 +9,9 @@ db/chroma/*
 *.egg-info/
 .pytest_cache/
 .DS_Store
+
+# Personal knowledge base content — never commit this. It's populated locally
+# and via /admin after deploy, not tracked in git. See data/knowledge/README.md.
+data/knowledge/*.md
+!data/knowledge/README.md
+data/knowledge/profile.json
